@@ -82,9 +82,6 @@
     // screensaver accel
     const SCREENSAVER_ACCEL = 6.0;
 
-    // NEW: remember if the intro has been seen (per tab). Switch to localStorage for persistence across tabs.
-    const INTRO_KEY = 'cathedral:introSeen';
-
     /************** Elements **************/
     const vid = document.getElementById('v0');
     const barFine   = document.getElementById('scrubber');
@@ -149,7 +146,7 @@
     function setByRatio(r, {fromParent=false} = {}){
       if (!isFinite(vid.duration) || vid.duration <= 0) return;
 
-      // ▼ CHANGED earlier: use smoother instead of instant seek
+      // ▼ CHANGED: use smoother instead of instant seek
       const t = ratioToTime(r);
       smoothSeek(t);
 
@@ -232,11 +229,53 @@
       }
     });
 
-    /************** Overlay / Intro logic **************/
+    /************** Overlay / Intro logic (VISIBLE) **************/
     let accelerating = false;
 
     function showOverlay(){
       overlay.classList.add('is-visible');
       overlay.setAttribute('aria-hidden','false');
       overlay.classList.remove('mode-intro');
-      try { v2.p
+      try { v2.pause(); v2.currentTime = 0; } catch(_) {}
+      try { v1.pause(); } catch(_) {}
+      v1.playbackRate = 1;
+      v1.loop = true;
+      try { v1.play().catch(()=>{}); } catch(_) {}
+
+      allowSync = false; // parent should ignore scrub until intro done
+      sendToParent({ type: 'lockScroll', value: true });
+    }
+    function hideOverlay(){
+      overlay.classList.remove('is-visible');
+      overlay.setAttribute('aria-hidden','true');
+      overlay.classList.remove('mode-intro');
+      try { v1.pause(); } catch(_) {}
+      try { v2.pause(); } catch(_) {}
+      allowSync = true;
+      sendToParent({ type: 'lockScroll', value: false });
+    }
+    function accelerateAndFinish(){
+      if (!overlay.classList.contains('is-visible')) return;
+      if (accelerating) return;
+      accelerating = true;
+      v1.loop = false;
+      v1.playbackRate = SCREENSAVER_ACCEL;
+      try { v1.play().catch(()=>{}); } catch(_) {}
+    }
+
+    v1.addEventListener('ended', ()=>{
+      if (!overlay.classList.contains('is-visible')) return;
+      overlay.classList.add('mode-intro');
+      try { v2.play().catch(()=>{}); } catch(_) {}
+    });
+
+    v2.addEventListener('ended', ()=>{ hideOverlay(); });
+
+    ['pointerdown','click','touchstart','keydown','wheel'].forEach(ev=>{
+      overlay.addEventListener(ev, accelerateAndFinish, { passive:true });
+    });
+
+    showOverlay();
+  </script>
+</body>
+</html>
