@@ -232,15 +232,36 @@
       vid.addEventListener(ev, updateSliderFromVideo);
     });
 
-    /************** Parent → Child: receive page scroll as 0..1 **************/
+    /************** Parent → Child: receive messages **************/
     addEventListener('message', (evt) => {
       const msg = parseMsg(evt.data);
+
+      // Handle scroll position from parent
       if (msg.type === 'scrollValue') {
         const ratio = Math.max(0, Math.min(1, Number(msg.value) || 0));
         const frame = Math.floor(ratio * NUMBER_OF_FRAMES);
         slider.value = frame;
         seekToFrame(frame);
         updateThumbColor(frame);
+      }
+
+      // Handle initial frame from parent (to skip intro)
+      if (msg.type === 'initialFrame' && msg.value !== undefined) {
+        const frame = Math.max(0, Math.min(parseInt(msg.value), NUMBER_OF_FRAMES));
+        console.log("Received initialFrame from parent:", frame);
+        startFrame = frame;
+        skipIntro = true;
+
+        // If video is already loaded, jump to frame immediately
+        if (vid.duration) {
+          slider.value = frame;
+          seekToFrame(frame);
+          updateThumbColor(frame);
+          hideOverlay();
+          allowSync = true;
+          const ratio = frame / NUMBER_OF_FRAMES;
+          sendToParent({ type:'scrubValue', value:ratio });
+        }
       }
     });
 
