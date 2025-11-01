@@ -133,6 +133,10 @@
     let allowSync = false;
     let accelerating = false;
 
+    // NEW: support resume via ?frame=### from parent
+    let startFrame = null;   // integer frame to jump to
+    let skipIntro = false;   // when true, don't show overlay
+
     function sendToParent(obj){
       try { parent.postMessage(JSON.stringify(obj), '*'); }
       catch(_) { try { parent.postMessage(obj, '*'); } catch(_) {} }
@@ -182,10 +186,23 @@
       }
     });
 
+    // Apply initial frame after metadata (covers parent message arriving early)
     vid.addEventListener('loadedmetadata', ()=>{
       slider.max = NUMBER_OF_FRAMES;
-      slider.value = 0;
-      updateThumbColor(0);
+
+      if (skipIntro && startFrame !== null) {
+        const clamped = Math.max(0, Math.min(startFrame, NUMBER_OF_FRAMES));
+        slider.value = clamped;
+        seekToFrame(clamped);
+        updateThumbColor(clamped);
+        hideOverlay();      // skip screensaver/intro
+        allowSync = true;
+        const ratio = clamped / NUMBER_OF_FRAMES;
+        sendToParent({ type:'scrubValue', value: ratio });
+      } else {
+        slider.value = 0;
+        updateThumbColor(0);
+      }
     });
 
     function updateSliderFromVideo(){
@@ -196,8 +213,11 @@
       vid.addEventListener(ev, updateSliderFromVideo);
     });
 
+    // Parent → Child messages (now handles initialFrame again)
     addEventListener('message', (evt) => {
       const msg = parseMsg(evt.data);
+
+      // scroll sync (unchanged)
       if (msg.type === 'scrollValue') {
         const ratio = Math.max(0, Math.min(1, Number(msg.value) || 0));
         const frame = Math.floor(ratio * NUMBER_OF_FRAMES);
@@ -205,9 +225,28 @@
         seekToFrame(frame);
         updateThumbColor(frame);
       }
+
+      // NEW: initial frame from parent
+      if (msg.type === 'initialFrame' && msg.value !== undefined) {
+        const raw = parseInt(msg.value);
+        const frame = Math.max(0, Math.min(raw, NUMBER_OF_FRAMES - 1));
+        startFrame = frame;
+        skipIntro = true;
+
+        // If video is already ready, jump immediately
+        if (vid.duration && vid.readyState >= 2) {
+          slider.value = frame;
+          seekToFrame(frame);
+          updateThumbColor(frame);
+          hideOverlay();
+          allowSync = true;
+          const ratio = frame / NUMBER_OF_FRAMES;
+          sendToParent({ type:'scrubValue', value: ratio });
+        }
+      }
     });
 
-    /* ---------- ORIGINAL BEHAVIOR: click -> accelerate v1; v1 'ended' -> play v2 ---------- */
+    /* ---------- ORIGINAL OVERLAY FLOW ---------- */
     function showOverlay(){
       overlay.classList.add('is-visible');
       overlay.setAttribute('aria-hidden','false');
@@ -247,7 +286,8 @@
       overlay.addEventListener(ev, accelerateAndFinish, { passive:true });
     });
 
-    // Boot
+    // Boot: if parent sent an initialFrame before metadata, we'll still
+    // show the overlay now, but loadedmetadata will immediately skip it.
     showOverlay();
   </script>
 </body>
