@@ -7,33 +7,84 @@
   <link rel="stylesheet" href="main.css" />
   <style>
     html,body{overflow:hidden;margin:0;padding:0;background:#000}
-    /* keep bars interactive and above video */
-    #scrubber, #scrubber2{ pointer-events:auto!important; z-index:10000!important; cursor:ew-resize; touch-action:none; }
     /* overlay should block clicks while visible; when hidden allow events through */
     #screensaver.is-visible{ pointer-events:auto; }
     #screensaver:not(.is-visible){ pointer-events:none; }
 
-    /* === Longer bars (width only) === */
-    /* Increase preferred width and allow a larger cap (good for iPad landscape) */
-    :root { --bar-min: 520px; --bar-vw: 96vw; --bar-max: 1360px; }
-
-    #scrubber, #scrubber2 {
-      width: clamp(var(--bar-min), var(--bar-vw), var(--bar-max)) !important;
-      background: transparent !important; /* keep the track minimal unless overridden */
-      box-shadow: none !important;
+    /* === Scrubber container === */
+    #scrubber-container {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
     }
 
-    /* Hide hint/fill only for the big invisible coarse bar */
-    #scrubber .scrubber__fill,
-    #scrubber .scrubber__hint { display: none !important; }
+    /* === Slider styling === */
+    #scrubber {
+      width: 50vw;
+      -webkit-appearance: none;
+      appearance: none;
+      outline: none;
+      height: 8px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 999px;
+      pointer-events: auto;
+      --thumb-color: #e8d21d;
+    }
+    #scrubber::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: var(--thumb-color);
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      border: 3px solid #fff;
+    }
+    #scrubber::-moz-range-thumb {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: var(--thumb-color);
+      cursor: pointer;
+      border: 3px solid #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
 
-    /* === Make the fine/frame-control bar visibly RED === */
-    /* Show the fill and color it red; keep hint hidden */
-    #scrubber2 .scrubber__hint { display: none !important; }
-    #scrubber2 .scrubber__fill {
-      display: block !important;
-      background: #ff2b2b !important;   /* red progress */
-      /* no height set here, so whatever your main.css defines stays the same (not taller) */
+    /* === Year labels === */
+    #year-labels {
+      width: 50vw;
+      position: relative;
+      height: 50px;
+      margin-top: 25px;
+    }
+    .year-label {
+      position: absolute;
+      font: 600 24px/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color: #000;
+      pointer-events: none;
+      user-select: none;
+      transform: translateX(-50%);
+    }
+    .year-label:nth-child(1) { left: 15%; }
+    .year-label:nth-child(2) { left: 35%; }
+    .year-label:nth-child(3) { left: 50%; }
+    .year-label:nth-child(4) { left: 65%; }
+    .year-label:nth-child(5) { left: 85%; }
+
+    @media (max-width: 768px) {
+      #scrubber, #year-labels {
+        width: 90vw;
+      }
+      .year-label {
+        font-size: 14px;
+      }
     }
   </style>
 </head>
@@ -43,16 +94,16 @@
     <source src="fingers.mp4" type="video/mp4" />
   </video>
 
-  <!-- Big invisible scrub bar (coarse) -->
-  <div id="scrubber" role="slider" aria-label="fine scrub" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-    <div class="scrubber__fill" aria-hidden="true"></div>
-    <div class="scrubber__hint" aria-hidden="true">scrub</div>
-  </div>
-
-  <!-- Small visible red scrub bar (fine / frame control) -->
-  <div id="scrubber2" role="slider" aria-label="coarse scrub" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-    <div class="scrubber__fill" aria-hidden="true"></div>
-    <div class="scrubber__hint" aria-hidden="true">coarse</div>
+  <!-- Video scrubber slider -->
+  <div id="scrubber-container">
+    <input type="range" id="scrubber" aria-label="video scrubber" min="0" max="300" value="0" step="1">
+    <div id="year-labels">
+      <span class="year-label">1185</span>
+      <span class="year-label">1545</span>
+      <span class="year-label">1693</span>
+      <span class="year-label">1938</span>
+      <span class="year-label">1991</span>
+    </div>
   </div>
 
   <!-- SCREEN SAVER / INTRO OVERLAY (VISIBLE ON LOAD) -->
@@ -67,63 +118,36 @@
 
   <script>
     /************** Config **************/
-    const PLAY_START = 0;
-    const PLAY_END   = null;   // null = full duration
-    const SNAP_TO_FRAMES = false;
     const FPS = 30;
-
-    // === Minimal smoothing knob (new) ===
-    const USE_SMOOTHING = true;   // turn off to revert to your original instant seeks
-    const SMOOTH_TAU_MS = 140;    // lower = snappier, higher = smoother
-
-    // throttle messages to Wix (ms)
-    const SEND_INTERVAL_MS = 50; // ~20 msgs/sec
-
-    // screensaver accel
+    const NUMBER_OF_FRAMES = 245; // Total frames for slider range
+    const SEND_INTERVAL_MS = 50; // throttle messages to Wix (ms)
     const SCREENSAVER_ACCEL = 6.0;
+
+    // Thumb color ranges based on frame positions (matching the year labels)
+    const THUMB_COLORS = [
+      { maxFrame: 37, color: '#e8d21d' },   // Yellow (0-15% ~ frame 0-37)
+      { maxFrame: 86, color: '#e8d21d' },   // Yellow (15-35% ~ frame 37-86)
+      { maxFrame: 123, color: '#ff2b2b' },  // Red (35-50% ~ frame 86-123)
+      { maxFrame: 159, color: '#4dd9c5' },  // Cyan/Green (50-65% ~ frame 123-159)
+      { maxFrame: 245, color: '#4287f5' }   // Blue (65-100% ~ frame 159-245)
+    ];
 
     /************** Elements **************/
     const vid = document.getElementById('v0');
-    const barFine   = document.getElementById('scrubber');
-    const barCoarse = document.getElementById('scrubber2');
-    const fillFine   = barFine.querySelector('.scrubber__fill');
-    const fillCoarse = barCoarse.querySelector('.scrubber__fill');
+    const slider = document.getElementById('scrubber');
 
     const overlay = document.getElementById('screensaver');
     const v1 = document.getElementById('ssv1'); // screensaver loop
     const v2 = document.getElementById('ssv2'); // intro
 
     /************** State **************/
-    let playStart = PLAY_START;
-    let playEnd   = PLAY_END;     // becomes duration after metadata
     let lastSentAt = 0;
-    let allowSync = false;        // parent can react to scrubValue only after intro
-    let applyingFromParent = false; // prevent echo on parent→child updates
+    let allowSync = false; // parent can react to scrubValue only after intro
 
-    const clamp01 = v => Math.max(0, Math.min(1, Number(v)||0));
-
-    /************** Minimal smoother (add-only) **************/
-    const __smooth = { target: 0, display: 0, last: 0, raf: 0 };
-    function smoothSeek(t){
-      if (!USE_SMOOTHING) { vid.currentTime = t; return; }
-      __smooth.target = t;
-      if (!__smooth.raf) {
-        __smooth.display = vid.currentTime || 0;
-        __smooth.last = performance.now();
-        const step = (now)=>{
-          const dt = Math.max(0, now - __smooth.last); __smooth.last = now;
-          const alpha = 1 - Math.exp(-dt / SMOOTH_TAU_MS);
-          __smooth.display += ( __smooth.target - __smooth.display ) * alpha;
-          let tApply = SNAP_TO_FRAMES && FPS>0 ? Math.round(__smooth.display*FPS)/FPS : __smooth.display;
-          if (Math.abs((vid.currentTime||0) - tApply) > (SNAP_TO_FRAMES? (0.45/FPS) : 0.01)) {
-            try { if (typeof vid.fastSeek === 'function') vid.fastSeek(tApply); else vid.currentTime = tApply; }
-            catch(_) { vid.currentTime = tApply; }
-          }
-          __smooth.raf = requestAnimationFrame(step);
-        };
-        __smooth.raf = requestAnimationFrame(step);
-      }
-    }
+    /************** URL Query Parameters **************/
+    const urlParams = new URLSearchParams(window.location.search);
+    const startFrame = urlParams.has('frame') ? parseInt(urlParams.get('frame')) : null;
+    const skipIntro = startFrame !== null;
 
     /************** Messaging helpers **************/
     function sendToParent(obj){
@@ -132,100 +156,89 @@
     }
     function parseMsg(d){ if (typeof d === 'string') { try { return JSON.parse(d); } catch { return {}; } } return d || {}; }
 
-    /************** Core mapping **************/
-    function ratioToTime(r){
-      if (!isFinite(vid.duration) || vid.duration <= 0) return 0;
-      const start = Math.max(0, Math.min(playStart, vid.duration));
-      const end   = (playEnd == null) ? vid.duration : Math.min(playEnd, vid.duration);
-      const span  = Math.max(0, end - start);
-      let t = start + clamp01(r) * span;
-      if (SNAP_TO_FRAMES && FPS > 0) t = Math.round(t * FPS) / FPS;
-      return t;
+    /************** Frame-based navigation **************/
+    function seekToFrame(frameNum){
+      if (!vid.duration) return;
+      const time = frameNum / FPS;
+      vid.currentTime = Math.min(time, vid.duration);
     }
 
-    function setByRatio(r, {fromParent=false} = {}){
-      if (!isFinite(vid.duration) || vid.duration <= 0) return;
+    function getCurrentFrame(){
+      if (!vid.duration) return 0;
+      return Math.floor(vid.currentTime * FPS);
+    }
 
-      // ▼ CHANGED: use smoother instead of instant seek
-      const t = ratioToTime(r);
-      smoothSeek(t);
+    /************** Dynamic thumb color **************/
+    function getColorForFrame(frame) {
+      for (let i = 0; i < THUMB_COLORS.length; i++) {
+        if (frame <= THUMB_COLORS[i].maxFrame) {
+          return THUMB_COLORS[i].color;
+        }
+      }
+      return THUMB_COLORS[THUMB_COLORS.length - 1].color;
+    }
 
-      // p = 0..1 progress within active window
-      const endForP = (playEnd==null ? (vid.duration||1) : playEnd);
-      const p = clamp01((t - (playStart || 0)) / ((endForP) - (playStart||0) || 1));
+    function updateThumbColor(frame) {
+      const color = getColorForFrame(frame);
+      slider.style.setProperty('--thumb-color', color);
+    }
 
-      // Update fills
-      if (fillFine)   fillFine.style.width   = (p*100).toFixed(3) + '%';
-      if (fillCoarse) fillCoarse.style.width = (p*100).toFixed(3) + '%';
-      barFine.setAttribute('aria-valuenow',   Math.round(p*100));
-      barCoarse.setAttribute('aria-valuenow', Math.round(p*100));
+    /************** Slider input handling **************/
+    slider.addEventListener('input', () => {
+      const frame = parseInt(slider.value);
+      seekToFrame(frame);
+      updateThumbColor(frame);
 
-      // Send to Wix (only after intro), and not if this came from Wix
-      if (!fromParent && allowSync) {
+      // Send ratio to parent (0-1)
+      if (allowSync) {
         const now = performance.now();
         if (now - lastSentAt >= SEND_INTERVAL_MS) {
           lastSentAt = now;
-          sendToParent({ type:'scrubValue', value:p }); // 0..1 precise
+          const ratio = frame / NUMBER_OF_FRAMES;
+          sendToParent({ type:'scrubValue', value:ratio });
         }
       }
-    }
-
-    /************** Hover/drag wiring (no click required) **************/
-    function ratioFromClientX(root, x){ const rect = root.getBoundingClientRect(); const dx = Math.min(Math.max(0, x - rect.left), rect.width); return rect.width ? (dx / rect.width) : 0; }
-    function inside(root, x, y){ const r = root.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; }
-
-    [barFine, barCoarse].forEach(root=>{
-      root.addEventListener('pointerenter', e => setByRatio(ratioFromClientX(root, e.clientX)));
-      root.addEventListener('mouseenter',   e => setByRatio(ratioFromClientX(root, e.clientX)));
     });
 
-    function onMove(e){
-      const { clientX:x, clientY:y } = e;
-      if (inside(barFine, x, y))   { setByRatio(ratioFromClientX(barFine,   x)); return; }
-      if (inside(barCoarse, x, y)) { setByRatio(ratioFromClientX(barCoarse, x)); return; }
-    }
-    addEventListener('mousemove', onMove, { passive:true });
-    addEventListener('pointermove', onMove, { passive:true });
-
-    [barFine, barCoarse].forEach(root=>{
-      let dragging = false;
-      root.addEventListener('pointerdown', e=>{ dragging=true; root.setPointerCapture?.(e.pointerId); setByRatio(ratioFromClientX(root, e.clientX)); });
-      root.addEventListener('pointermove', e=>{ if(dragging) setByRatio(ratioFromClientX(root, e.clientX)); });
-      root.addEventListener('pointerup',   ()=> dragging=false);
-      root.addEventListener('pointercancel',()=> dragging=false);
-    });
-
-    /************** Metadata: set window **************/
+    /************** Metadata: set slider max to frame count **************/
     vid.addEventListener('loadedmetadata', ()=>{
-      const dur = isFinite(vid.duration) ? vid.duration : 0;
-      if (dur > 0) {
-        playStart = Math.max(0, Math.min(PLAY_START, dur));
-        playEnd   = (PLAY_END == null) ? dur : Math.max(playStart, Math.min(PLAY_END, dur));
+      slider.max = NUMBER_OF_FRAMES;
+
+      // If frame query param exists, skip to that frame
+      if (skipIntro && startFrame !== null) {
+        const clampedFrame = Math.max(0, Math.min(startFrame, NUMBER_OF_FRAMES));
+        slider.value = clampedFrame;
+        seekToFrame(clampedFrame);
+        updateThumbColor(clampedFrame);
+        allowSync = true; // Enable sync immediately
+
+        // Notify parent of initial frame position
+        const ratio = clampedFrame / NUMBER_OF_FRAMES;
+        sendToParent({ type:'scrubValue', value:ratio });
+      } else {
+        slider.value = 0;
+        updateThumbColor(0);
       }
-      setByRatio( (vid.currentTime && dur) ? (vid.currentTime / dur) : 0 );
     });
 
-    /************** Keep fills aligned if video changes otherwise **************/
-    function updateFillsFromVideo(){
+    /************** Keep slider aligned if video changes **************/
+    function updateSliderFromVideo(){
       if (!vid.duration) return;
-      const p = clamp01( vid.currentTime / (vid.duration || 1) );
-      if (fillFine)   fillFine.style.width   = (p*100).toFixed(3)+'%';
-      if (fillCoarse) fillCoarse.style.width = (p*100).toFixed(3)+'%';
-      barFine.setAttribute('aria-valuenow', Math.round(p*100));
-      barCoarse.setAttribute('aria-valuenow', Math.round(p*100));
+      slider.value = getCurrentFrame();
     }
     ['timeupdate','seeking','seeked','play','pause'].forEach(ev=>{
-      vid.addEventListener(ev, updateFillsFromVideo);
+      vid.addEventListener(ev, updateSliderFromVideo);
     });
 
     /************** Parent → Child: receive page scroll as 0..1 **************/
     addEventListener('message', (evt) => {
       const msg = parseMsg(evt.data);
       if (msg.type === 'scrollValue') {
-        const p = clamp01(Number(msg.value) || 0);
-        applyingFromParent = true;
-        setByRatio(p, {fromParent:true});
-        setTimeout(()=>{ applyingFromParent = false; }, SEND_INTERVAL_MS);
+        const ratio = Math.max(0, Math.min(1, Number(msg.value) || 0));
+        const frame = Math.floor(ratio * NUMBER_OF_FRAMES);
+        slider.value = frame;
+        seekToFrame(frame);
+        updateThumbColor(frame);
       }
     });
 
@@ -275,7 +288,13 @@
       overlay.addEventListener(ev, accelerateAndFinish, { passive:true });
     });
 
-    showOverlay();
+    // Show overlay only if not skipping to a specific frame
+    if (!skipIntro) {
+      showOverlay();
+    } else {
+      // Skip intro entirely - hide overlay and enable sync
+      hideOverlay();
+    }
   </script>
 </body>
 </html>
