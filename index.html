@@ -8,6 +8,7 @@
   <style>
     html,body{overflow:hidden;margin:0;padding:0;background:#000}
 
+    /* overlay should block clicks while visible; when hidden allow events through */
     #screensaver.is-visible{ pointer-events:auto; }
     #screensaver:not(.is-visible){ pointer-events:none; }
 
@@ -17,12 +18,20 @@
       left: 50%;
       bottom: 14vh;
       transform: translateX(-50%);
-      z-index: 10000;
+      z-index: 10000; /* stays below overlay now */
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 10px;
       pointer-events: auto;
+    }
+
+    /* Keep the overlay above the scrubber (restore old behavior) */
+    #screensaver {
+      position: fixed;
+      inset: 0;
+      z-index: 20000; /* overlay now covers scrubber until hidden */
+      background: #000;
     }
 
     /* Solid neutral slider bar (no gradient) */
@@ -214,26 +223,4 @@
       try { v1.pause(); } catch(_) {}
       try { v2.pause(); } catch(_) {}
       allowSync = true;
-      sendToParent({ type: 'lockScroll', value: false });
-    }
-    function accelerateAndFinish(){
-      if (!overlay.classList.contains('is-visible')) return;
-      if (accelerating) return;
-      accelerating = true;
-      v1.loop = false;
-      v1.playbackRate = SCREENSAVER_ACCEL;
-      try { v1.play().catch(()=>{}); } catch(_) {}
-    }
-    v1.addEventListener('ended', ()=>{
-      if (!overlay.classList.contains('is-visible')) return;
-      overlay.classList.add('mode-intro');
-      try { v2.play().catch(()=>{}); } catch(_) {}
-    });
-    v2.addEventListener('ended', ()=>{ hideOverlay(); });
-    ['pointerdown','click','touchstart','keydown','wheel'].forEach(ev=>{
-      overlay.addEventListener(ev, accelerateAndFinish, { passive:true });
-    });
-    showOverlay();
-  </script>
-</body>
-</html>
+      sendToParent({ type:
