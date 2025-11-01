@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Scrub ↔ Page Sync (Solid Track + Resume)</title>
+  <title>Scrub ↔ Page Sync (Solid Track)</title>
   <link rel="stylesheet" href="main.css" />
   <style>
     html,body{overflow:hidden;margin:0;padding:0;background:#000}
@@ -48,4 +48,239 @@
       background: color-mix(in oklab, var(--thumb-color) 85%, #ffffff 15%);
       cursor: pointer;
       border: 3px solid rgba(255,255,255,0.9);
-      bo
+      box-shadow: 0 6px 14px rgba(0,0,0,0.18);
+    }
+    #scrubber::-moz-range-thumb {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: color-mix(in oklab, var(--thumb-color) 85%, #ffffff 15%);
+      cursor: pointer;
+      border: 3px solid rgba(255,255,255,0.9);
+      box-shadow: 0 6px 14px rgba(0,0,0,0.18);
+    }
+
+    /* === Year labels ABOVE the slider, larger, quick fade === */
+    #year-labels {
+      order: -1;
+      width: 54vw;
+      position: relative;
+      height: 68px;
+      margin: 0 0 6px 0;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 120ms ease-out, transform 120ms ease-out;
+    }
+    #year-labels.is-visible { opacity: 1; transform: translateY(0); }
+
+    .year-label {
+      position: absolute;
+      font: 700 clamp(22px, 3.2vw, 42px)/1.1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color: #111;
+      text-shadow: 0 2px 10px rgba(255,255,255,0.75), 0 1px 18px rgba(0,0,0,0.18);
+      user-select: none;
+      transform: translateX(-50%);
+    }
+
+    @media (max-width: 768px) {
+      #scrubber, #year-labels { width: 90vw; }
+      .year-label { font-size: clamp(18px, 6vw, 30px); }
+      #scrubber-container { bottom: 12vh; }
+    }
+  </style>
+</head>
+<body>
+  <video id="v0" playsinline muted preload="auto">
+    <source src="fingers.mp4" type="video/mp4" />
+  </video>
+
+  <div id="scrubber-container">
+    <div id="year-labels">
+      <span class="year-label">1185</span>
+      <span class="year-label">1545</span>
+      <span class="year-label">1693</span>
+      <span class="year-label">1938</span>
+      <span class="year-label">1991</span>
+    </div>
+    <input type="range" id="scrubber" aria-label="video scrubber" min="0" max="300" value="0" step="1">
+  </div>
+
+  <div id="screensaver" class="is-visible" aria-hidden="false">
+    <video id="ssv1" playsinline muted preload="auto" autoplay loop>
+      <source src="screensaver.mp4" type="video/mp4" />
+    </video>
+    <video id="ssv2" playsinline muted preload="auto">
+      <source src="intro.mp4" type="video/mp4" />
+    </video>
+  </div>
+
+  <script>
+    const FPS = 30;
+    const NUMBER_OF_FRAMES = 245;
+    const SEND_INTERVAL_MS = 50;
+    const SCREENSAVER_ACCEL = 6.0;
+    const BUFFER_FRAMES = 10;
+
+    // More green than cyan
+    const SECTION_COLORS = [
+      '#e8d21d', // yellow
+      '#e8d21d',
+      '#ff2b2b', // red
+      '#2fc08f', // greener cyan
+      '#4287f5'  // blue
+    ];
+
+    const vid = document.getElementById('v0');
+    const slider = document.getElementById('scrubber');
+    const overlay = document.getElementById('screensaver');
+    const v1 = document.getElementById('ssv1');
+    const v2 = document.getElementById('ssv2');
+    const labelsEl = document.getElementById('year-labels');
+    const labels = Array.from(labelsEl.querySelectorAll('.year-label'));
+
+    let lastSentAt = 0;
+    let allowSync = false;
+    let startFrame = null;
+    let skipIntro = false;
+
+    function sendToParent(obj){
+      try { parent.postMessage(JSON.stringify(obj), '*'); }
+      catch(_) { try { parent.postMessage(obj, '*'); } catch(_) {} }
+    }
+    function parseMsg(d){ if (typeof d === 'string') { try { return JSON.parse(d); } catch { return {}; } } return d || {}; }
+
+    const usableStart = BUFFER_FRAMES;
+    const usableEnd   = NUMBER_OF_FRAMES - BUFFER_FRAMES;
+    const usableSpan  = usableEnd - usableStart;
+    const sectionSize = usableSpan / 5;
+
+    function sectionIndexForFrame(frame) {
+      if (frame < usableStart || frame >= usableEnd) return -1;
+      const idx = Math.floor((frame - usableStart) / sectionSize);
+      return Math.min(Math.max(idx, 0), 4);
+    }
+
+    function getColorForFrame(frame) {
+      const idx = sectionIndexForFrame(frame);
+      return idx === -1 ? '#ffffff' : SECTION_COLORS[idx];
+    }
+    function updateThumbColor(frame) {
+      slider.style.setProperty('--thumb-color', getColorForFrame(frame));
+    }
+
+    function positionLabels() {
+      for (let i = 0; i < 5; i++) {
+        const centerFrame = usableStart + (i + 0.5) * sectionSize;
+        const leftPct = (centerFrame / NUMBER_OF_FRAMES) * 100;
+        labels[i].style.left = `${leftPct}%`;
+      }
+    }
+
+    function seekToFrame(frameNum){
+      if (!vid.duration) return;
+      const time = frameNum / FPS;
+      vid.currentTime = Math.min(time, vid.duration);
+    }
+    function getCurrentFrame(){
+      if (!vid.duration) return 0;
+      return Math.floor(vid.currentTime * FPS);
+    }
+
+    let labelHideTimer = null;
+    function flashLabels() {
+      labelsEl.classList.add('is-visible');
+      if (labelHideTimer) clearTimeout(labelHideTimer);
+      labelHideTimer = setTimeout(() => {
+        labelsEl.classList.remove('is-visible');
+      }, 450);
+    }
+
+    slider.addEventListener('input', () => {
+      const frame = parseInt(slider.value);
+      seekToFrame(frame);
+      updateThumbColor(frame);
+      flashLabels();
+
+      if (allowSync) {
+        const now = performance.now();
+        if (now - lastSentAt >= SEND_INTERVAL_MS) {
+          lastSentAt = now;
+          const ratio = frame / NUMBER_OF_FRAMES;
+          sendToParent({ type:'scrubValue', value:ratio });
+        }
+      }
+    });
+    ['pointerenter','focus'].forEach(ev => {
+      slider.addEventListener(ev, flashLabels, { passive:true });
+    });
+
+    vid.addEventListener('loadedmetadata', ()=>{
+      slider.max = NUMBER_OF_FRAMES;
+      positionLabels();
+      slider.value = 0;
+      updateThumbColor(0);
+    });
+
+    function updateSliderFromVideo(){
+      if (!vid.duration) return;
+      slider.value = getCurrentFrame();
+    }
+    ['timeupdate','seeking','seeked','play','pause'].forEach(ev=>{
+      vid.addEventListener(ev, updateSliderFromVideo);
+    });
+
+    addEventListener('message', (evt) => {
+      const msg = parseMsg(evt.data);
+      if (msg.type === 'scrollValue') {
+        const ratio = Math.max(0, Math.min(1, Number(msg.value) || 0));
+        const frame = Math.floor(ratio * NUMBER_OF_FRAMES);
+        slider.value = frame;
+        seekToFrame(frame);
+        updateThumbColor(frame);
+      }
+    });
+
+    let accelerating = false;
+    function showOverlay(){
+      overlay.classList.add('is-visible');
+      overlay.setAttribute('aria-hidden','false');
+      overlay.classList.remove('mode-intro');
+      try { v2.pause(); v2.currentTime = 0; } catch(_) {}
+      try { v1.pause(); } catch(_) {}
+      v1.playbackRate = 1;
+      v1.loop = true;
+      try { v1.play().catch(()=>{}); } catch(_) {}
+      allowSync = false;
+      sendToParent({ type: 'lockScroll', value: true });
+    }
+    function hideOverlay(){
+      overlay.classList.remove('is-visible');
+      overlay.setAttribute('aria-hidden','true');
+      overlay.classList.remove('mode-intro');
+      try { v1.pause(); } catch(_) {}
+      try { v2.pause(); } catch(_) {}
+      allowSync = true;
+      sendToParent({ type: 'lockScroll', value: false });
+    }
+    function accelerateAndFinish(){
+      if (!overlay.classList.contains('is-visible')) return;
+      if (accelerating) return;
+      accelerating = true;
+      v1.loop = false;
+      v1.playbackRate = SCREENSAVER_ACCEL;
+      try { v1.play().catch(()=>{}); } catch(_) {}
+    }
+    v1.addEventListener('ended', ()=>{
+      if (!overlay.classList.contains('is-visible')) return;
+      overlay.classList.add('mode-intro');
+      try { v2.play().catch(()=>{}); } catch(_) {}
+    });
+    v2.addEventListener('ended', ()=>{ hideOverlay(); });
+    ['pointerdown','click','touchstart','keydown','wheel'].forEach(ev=>{
+      overlay.addEventListener(ev, accelerateAndFinish, { passive:true });
+    });
+    showOverlay();
+  </script>
+</body>
+</html>
