@@ -149,6 +149,8 @@
     const startFrame = urlParams.has('frame') ? parseInt(urlParams.get('frame')) : null;
     const skipIntro = startFrame !== null;
 
+    console.log("testing the frame", startFrame, skipIntro)
+
     /************** Messaging helpers **************/
     function sendToParent(obj){
       try { parent.postMessage(JSON.stringify(obj), '*'); }
