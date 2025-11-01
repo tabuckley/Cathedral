@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Scrub ↔ Page Sync (Equal Sections + Gradient)</title>
+  <title>Scrub ↔ Page Sync (Solid Track)</title>
   <link rel="stylesheet" href="main.css" />
   <style>
     html,body{overflow:hidden;margin:0;padding:0;background:#000}
@@ -16,17 +16,17 @@
     #scrubber-container {
       position: fixed;
       left: 50%;
-      bottom: 14vh;                 /* sits over the model */
+      bottom: 14vh; /* sits over the model */
       transform: translateX(-50%);
       z-index: 10000;
       display: flex;
-      flex-direction: column;       /* labels above slider */
+      flex-direction: column; /* labels above slider */
       align-items: center;
       gap: 10px;
       pointer-events: auto;
     }
 
-    /* Translucent track; background gets replaced with a JS-built gradient */
+    /* Solid neutral slider bar (no gradient) */
     #scrubber {
       width: 54vw;
       -webkit-appearance: none;
@@ -91,12 +91,10 @@
   </style>
 </head>
 <body>
-  <!-- MAIN VIDEO -->
   <video id="v0" playsinline muted preload="auto">
     <source src="fingers.mp4" type="video/mp4" />
   </video>
 
-  <!-- Video scrubber slider -->
   <div id="scrubber-container">
     <div id="year-labels">
       <span class="year-label">1185</span>
@@ -108,7 +106,6 @@
     <input type="range" id="scrubber" aria-label="video scrubber" min="0" max="300" value="0" step="1">
   </div>
 
-  <!-- SCREEN SAVER / INTRO OVERLAY (VISIBLE ON LOAD) -->
   <div id="screensaver" class="is-visible" aria-hidden="false">
     <video id="ssv1" playsinline muted preload="auto" autoplay loop>
       <source src="screensaver.mp4" type="video/mp4" />
@@ -119,26 +116,21 @@
   </div>
 
   <script>
-    /************** Config **************/
     const FPS = 30;
     const NUMBER_OF_FRAMES = 245;
     const SEND_INTERVAL_MS = 50;
     const SCREENSAVER_ACCEL = 6.0;
-
-    // Buffers: first & last N frames are white
     const BUFFER_FRAMES = 10;
 
-    // Section colors (5 equal sections between the buffers)
-    // greener-than-cyan to match your mock (tweak if needed)
+    // More green than cyan
     const SECTION_COLORS = [
       '#e8d21d', // yellow
-      '#e8d21d', // yellow again
+      '#e8d21d',
       '#ff2b2b', // red
-      '#2fc08f', // greener-cyan
+      '#2fc08f', // greener cyan
       '#4287f5'  // blue
     ];
 
-    /************** Elements **************/
     const vid = document.getElementById('v0');
     const slider = document.getElementById('scrubber');
     const overlay = document.getElementById('screensaver');
@@ -147,33 +139,28 @@
     const labelsEl = document.getElementById('year-labels');
     const labels = Array.from(labelsEl.querySelectorAll('.year-label'));
 
-    /************** State **************/
     let lastSentAt = 0;
     let allowSync = false;
     let startFrame = null;
     let skipIntro = false;
 
-    /************** Messaging helpers **************/
     function sendToParent(obj){
       try { parent.postMessage(JSON.stringify(obj), '*'); }
       catch(_) { try { parent.postMessage(obj, '*'); } catch(_) {} }
     }
     function parseMsg(d){ if (typeof d === 'string') { try { return JSON.parse(d); } catch { return {}; } } return d || {}; }
 
-    /************** Derived ranges (equal sections between buffers) **************/
     const usableStart = BUFFER_FRAMES;
-    const usableEnd   = NUMBER_OF_FRAMES - BUFFER_FRAMES;       // exclusive upper bound for our math
-    const usableSpan  = usableEnd - usableStart;                // frames in the middle
-    const sectionSize = usableSpan / 5;                         // equal sized sections
+    const usableEnd   = NUMBER_OF_FRAMES - BUFFER_FRAMES;
+    const usableSpan  = usableEnd - usableStart;
+    const sectionSize = usableSpan / 5;
 
-    // Frame → section index (0..4), or -1 for buffers
     function sectionIndexForFrame(frame) {
       if (frame < usableStart || frame >= usableEnd) return -1;
       const idx = Math.floor((frame - usableStart) / sectionSize);
       return Math.min(Math.max(idx, 0), 4);
     }
 
-    // For the dynamic thumb color (white in buffers)
     function getColorForFrame(frame) {
       const idx = sectionIndexForFrame(frame);
       return idx === -1 ? '#ffffff' : SECTION_COLORS[idx];
@@ -182,43 +169,6 @@
       slider.style.setProperty('--thumb-color', getColorForFrame(frame));
     }
 
-    // Build a gradient track with white buffers and smooth transitions between section colors
-    function updateTrackGradient() {
-      const toPct = f => (f / NUMBER_OF_FRAMES) * 100;
-
-      const p0 = toPct(0);
-      const pStart = toPct(usableStart);
-      const pEnd   = toPct(usableEnd);
-      const p100 = 100;
-
-      // Section boundary percents
-      const boundaries = [];
-      for (let i = 0; i <= 5; i++) {
-        boundaries.push(toPct(usableStart + i * sectionSize));
-      }
-
-      // Build stops: white buffer → sections → white buffer
-      const stops = [];
-      stops.push(`white ${p0}%`, `white ${pStart}%`);
-
-      // Add a color stop at each boundary; CSS will blend between them
-      // Colors follow SECTION_COLORS across 5 sections
-      // At boundaries[0] (pStart) use color for section 0, then at boundaries[1] color for section 1, etc.
-      for (let i = 0; i < 5; i++) {
-        const cA = SECTION_COLORS[i];
-        const pA = boundaries[i];
-        stops.push(`${cA} ${pA}%`);
-        const pB = boundaries[i+1];
-        const cB = SECTION_COLORS[Math.min(i+1, 4)];
-        stops.push(`${cB} ${pB}%`);
-      }
-
-      stops.push(`white ${pEnd}%`, `white ${p100}%`);
-
-      slider.style.background = `linear-gradient(to right, ${stops.join(', ')})`;
-    }
-
-    // Position labels at the center of each equal section
     function positionLabels() {
       for (let i = 0; i < 5; i++) {
         const centerFrame = usableStart + (i + 0.5) * sectionSize;
@@ -227,7 +177,6 @@
       }
     }
 
-    /************** Frame navigation **************/
     function seekToFrame(frameNum){
       if (!vid.duration) return;
       const time = frameNum / FPS;
@@ -238,7 +187,6 @@
       return Math.floor(vid.currentTime * FPS);
     }
 
-    /************** Year labels quick flash **************/
     let labelHideTimer = null;
     function flashLabels() {
       labelsEl.classList.add('is-visible');
@@ -248,7 +196,6 @@
       }, 450);
     }
 
-    /************** Slider input **************/
     slider.addEventListener('input', () => {
       const frame = parseInt(slider.value);
       seekToFrame(frame);
@@ -268,27 +215,13 @@
       slider.addEventListener(ev, flashLabels, { passive:true });
     });
 
-    /************** Metadata **************/
     vid.addEventListener('loadedmetadata', ()=>{
       slider.max = NUMBER_OF_FRAMES;
       positionLabels();
-      updateTrackGradient();
-
-      if (skipIntro && startFrame !== null) {
-        const clamped = Math.max(0, Math.min(startFrame, NUMBER_OF_FRAMES));
-        slider.value = clamped;
-        seekToFrame(clamped);
-        updateThumbColor(clamped);
-        allowSync = true;
-        const ratio = clamped / NUMBER_OF_FRAMES;
-        sendToParent({ type:'scrubValue', value:ratio });
-      } else {
-        slider.value = 0;
-        updateThumbColor(0);
-      }
+      slider.value = 0;
+      updateThumbColor(0);
     });
 
-    /************** Keep slider aligned **************/
     function updateSliderFromVideo(){
       if (!vid.duration) return;
       slider.value = getCurrentFrame();
@@ -297,7 +230,6 @@
       vid.addEventListener(ev, updateSliderFromVideo);
     });
 
-    /************** Messages from parent **************/
     addEventListener('message', (evt) => {
       const msg = parseMsg(evt.data);
       if (msg.type === 'scrollValue') {
@@ -307,24 +239,8 @@
         seekToFrame(frame);
         updateThumbColor(frame);
       }
-      if (msg.type === 'initialFrame' && msg.value !== undefined) {
-        const rawFrame = parseInt(msg.value);
-        const frame = Math.max(0, Math.min(rawFrame, NUMBER_OF_FRAMES - 1));
-        startFrame = frame;
-        skipIntro = true;
-        if (vid.duration && vid.readyState >= 2) {
-          slider.value = frame;
-          seekToFrame(frame);
-          updateThumbColor(frame);
-          hideOverlay();
-          allowSync = true;
-          const ratio = frame / NUMBER_OF_FRAMES;
-          sendToParent({ type:'scrubValue', value:ratio });
-        }
-      }
     });
 
-    /************** Overlay / Intro logic **************/
     let accelerating = false;
     function showOverlay(){
       overlay.classList.add('is-visible');
@@ -364,7 +280,7 @@
     ['pointerdown','click','touchstart','keydown','wheel'].forEach(ev=>{
       overlay.addEventListener(ev, accelerateAndFinish, { passive:true });
     });
-    if (!skipIntro) showOverlay(); else hideOverlay();
+    showOverlay();
   </script>
 </body>
 </html>
