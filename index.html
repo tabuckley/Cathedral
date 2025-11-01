@@ -144,12 +144,9 @@
     let lastSentAt = 0;
     let allowSync = false; // parent can react to scrubValue only after intro
 
-    /************** URL Query Parameters **************/
-    const urlParams = new URLSearchParams(window.location.search);
-    const startFrame = urlParams.has('frame') ? parseInt(urlParams.get('frame')) : null;
-    const skipIntro = startFrame !== null;
-
-    console.log("testing the frame", startFrame, skipIntro)
+    /************** Initial frame state **************/
+    let startFrame = null;
+    let skipIntro = false;
 
     /************** Messaging helpers **************/
     function sendToParent(obj){
@@ -247,13 +244,15 @@
 
       // Handle initial frame from parent (to skip intro)
       if (msg.type === 'initialFrame' && msg.value !== undefined) {
-        const frame = Math.max(0, Math.min(parseInt(msg.value), NUMBER_OF_FRAMES));
-        console.log("Received initialFrame from parent:", frame);
+        const rawFrame = parseInt(msg.value);
+        // Clamp to valid range
+        const frame = Math.max(0, Math.min(rawFrame, NUMBER_OF_FRAMES - 1));
+        console.log("Received initialFrame from parent:", rawFrame, "clamped to:", frame);
         startFrame = frame;
         skipIntro = true;
 
-        // If video is already loaded, jump to frame immediately
-        if (vid.duration) {
+        // If video is already loaded and ready, jump to frame immediately
+        if (vid.duration && vid.readyState >= 2) {
           slider.value = frame;
           seekToFrame(frame);
           updateThumbColor(frame);
