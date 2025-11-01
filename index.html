@@ -35,7 +35,7 @@
       background: rgba(255,255,255,0.28);
       border-radius: 999px;
       pointer-events: auto;
-      --thumb-color: #F8C84C;
+      --thumb-color: #F8C84C; /* default = first section (yellow) */
       box-shadow: 0 0 0 1px rgba(0,0,0,0.12) inset, 0 3px 12px rgba(0,0,0,0.08);
     }
     #scrubber::-webkit-slider-thumb {
@@ -59,7 +59,7 @@
       box-shadow: 0 6px 14px rgba(0,0,0,0.18);
     }
 
-    /* Empty label container retained for spacing & fade animation */
+    /* Empty label container retained for spacing & fade animation (no numbers) */
     #year-labels {
       order: -1;
       width: 54vw;
@@ -73,22 +73,6 @@
     @media (max-width: 768px) {
       #scrubber, #year-labels { width: 90vw; }
       #scrubber-container { bottom: 12vh; }
-    }
-
-    /* Ensure videos fill viewport */
-    #v0, #screensaver video {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-    #screensaver {
-      position: fixed;
-      inset: 0;
-      background: #000;
-      z-index: 9999;
     }
   </style>
 </head>
@@ -118,13 +102,13 @@
     const SCREENSAVER_ACCEL = 6.0;
     const BUFFER_FRAMES = 10;
 
-    // 🎨 Exact palette from uploaded image (left → right)
+    // Exact shades in the requested order: yellow, yellow, red, green, blue
     const SECTION_COLORS = [
-      '#2E6C56', // green
-      '#EC5B46', // red
       '#F8C84C', // yellow
-      '#344696', // blue
-      '#344696'  // extend last color for even spacing
+      '#F8C84C', // yellow
+      '#EC5B46', // red
+      '#2E6C56', // green
+      '#344696'  // blue
     ];
 
     const vid = document.getElementById('v0');
@@ -141,7 +125,6 @@
       try { parent.postMessage(JSON.stringify(obj), '*'); }
       catch(_) { try { parent.postMessage(obj, '*'); } catch(_) {} }
     }
-
     function parseMsg(d){ if (typeof d === 'string') { try { return JSON.parse(d); } catch { return {}; } } return d || {}; }
 
     const usableStart = BUFFER_FRAMES;
@@ -224,7 +207,6 @@
       allowSync = false;
       sendToParent({ type: 'lockScroll', value: true });
     }
-
     function hideOverlay(){
       overlay.classList.remove('is-visible');
       overlay.setAttribute('aria-hidden','true');
@@ -234,7 +216,6 @@
       allowSync = true;
       sendToParent({ type: 'lockScroll', value: false });
     }
-
     function accelerateAndFinish(){
       if (!overlay.classList.contains('is-visible')) return;
       if (accelerating) return;
@@ -243,7 +224,6 @@
       v1.playbackRate = SCREENSAVER_ACCEL;
       try { v1.play().catch(()=>{}); } catch(_) {}
     }
-
     v1.addEventListener('ended', ()=>{
       if (!overlay.classList.contains('is-visible')) return;
       overlay.classList.add('mode-intro');
