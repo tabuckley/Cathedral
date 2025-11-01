@@ -8,7 +8,6 @@
   <style>
     html,body{overflow:hidden;margin:0;padding:0;background:#000}
 
-    /* overlay should block clicks while visible; when hidden allow events through */
     #screensaver.is-visible{ pointer-events:auto; }
     #screensaver:not(.is-visible){ pointer-events:none; }
 
@@ -16,11 +15,11 @@
     #scrubber-container {
       position: fixed;
       left: 50%;
-      bottom: 14vh; /* sits over the model */
+      bottom: 14vh;
       transform: translateX(-50%);
       z-index: 10000;
       display: flex;
-      flex-direction: column; /* labels above slider */
+      flex-direction: column;
       align-items: center;
       gap: 10px;
       pointer-events: auto;
@@ -36,7 +35,7 @@
       background: rgba(255,255,255,0.28);
       border-radius: 999px;
       pointer-events: auto;
-      --thumb-color: #e8d21d;
+      --thumb-color: #F8C84C;
       box-shadow: 0 0 0 1px rgba(0,0,0,0.12) inset, 0 3px 12px rgba(0,0,0,0.08);
     }
     #scrubber::-webkit-slider-thumb {
@@ -60,33 +59,36 @@
       box-shadow: 0 6px 14px rgba(0,0,0,0.18);
     }
 
-    /* === Year labels ABOVE the slider, larger, quick fade === */
+    /* Empty label container retained for spacing & fade animation */
     #year-labels {
       order: -1;
       width: 54vw;
-      position: relative;
-      height: 68px;
+      height: 40px;
       margin: 0 0 6px 0;
-      pointer-events: none;
       opacity: 0;
-      transform: translateY(4px);
       transition: opacity 120ms ease-out, transform 120ms ease-out;
     }
     #year-labels.is-visible { opacity: 1; transform: translateY(0); }
 
-    .year-label {
-      position: absolute;
-      font: 700 clamp(22px, 3.2vw, 42px)/1.1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-      color: #111;
-      text-shadow: 0 2px 10px rgba(255,255,255,0.75), 0 1px 18px rgba(0,0,0,0.18);
-      user-select: none;
-      transform: translateX(-50%);
-    }
-
     @media (max-width: 768px) {
       #scrubber, #year-labels { width: 90vw; }
-      .year-label { font-size: clamp(18px, 6vw, 30px); }
       #scrubber-container { bottom: 12vh; }
+    }
+
+    /* Ensure videos fill viewport */
+    #v0, #screensaver video {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    #screensaver {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 9999;
     }
   </style>
 </head>
@@ -96,13 +98,7 @@
   </video>
 
   <div id="scrubber-container">
-    <div id="year-labels">
-      <span class="year-label">1185</span>
-      <span class="year-label">1545</span>
-      <span class="year-label">1693</span>
-      <span class="year-label">1938</span>
-      <span class="year-label">1991</span>
-    </div>
+    <div id="year-labels"></div>
     <input type="range" id="scrubber" aria-label="video scrubber" min="0" max="300" value="0" step="1">
   </div>
 
@@ -122,13 +118,13 @@
     const SCREENSAVER_ACCEL = 6.0;
     const BUFFER_FRAMES = 10;
 
-    // More green than cyan
+    // 🎨 Exact palette from uploaded image (left → right)
     const SECTION_COLORS = [
-      '#e8d21d', // yellow
-      '#e8d21d',
-      '#ff2b2b', // red
-      '#2fc08f', // greener cyan
-      '#4287f5'  // blue
+      '#2E6C56', // green
+      '#EC5B46', // red
+      '#F8C84C', // yellow
+      '#344696', // blue
+      '#344696'  // extend last color for even spacing
     ];
 
     const vid = document.getElementById('v0');
@@ -136,18 +132,16 @@
     const overlay = document.getElementById('screensaver');
     const v1 = document.getElementById('ssv1');
     const v2 = document.getElementById('ssv2');
-    const labelsEl = document.getElementById('year-labels');
-    const labels = Array.from(labelsEl.querySelectorAll('.year-label'));
 
     let lastSentAt = 0;
     let allowSync = false;
-    let startFrame = null;
-    let skipIntro = false;
+    let accelerating = false;
 
     function sendToParent(obj){
       try { parent.postMessage(JSON.stringify(obj), '*'); }
       catch(_) { try { parent.postMessage(obj, '*'); } catch(_) {} }
     }
+
     function parseMsg(d){ if (typeof d === 'string') { try { return JSON.parse(d); } catch { return {}; } } return d || {}; }
 
     const usableStart = BUFFER_FRAMES;
@@ -169,14 +163,6 @@
       slider.style.setProperty('--thumb-color', getColorForFrame(frame));
     }
 
-    function positionLabels() {
-      for (let i = 0; i < 5; i++) {
-        const centerFrame = usableStart + (i + 0.5) * sectionSize;
-        const leftPct = (centerFrame / NUMBER_OF_FRAMES) * 100;
-        labels[i].style.left = `${leftPct}%`;
-      }
-    }
-
     function seekToFrame(frameNum){
       if (!vid.duration) return;
       const time = frameNum / FPS;
@@ -187,21 +173,10 @@
       return Math.floor(vid.currentTime * FPS);
     }
 
-    let labelHideTimer = null;
-    function flashLabels() {
-      labelsEl.classList.add('is-visible');
-      if (labelHideTimer) clearTimeout(labelHideTimer);
-      labelHideTimer = setTimeout(() => {
-        labelsEl.classList.remove('is-visible');
-      }, 450);
-    }
-
     slider.addEventListener('input', () => {
       const frame = parseInt(slider.value);
       seekToFrame(frame);
       updateThumbColor(frame);
-      flashLabels();
-
       if (allowSync) {
         const now = performance.now();
         if (now - lastSentAt >= SEND_INTERVAL_MS) {
@@ -211,13 +186,9 @@
         }
       }
     });
-    ['pointerenter','focus'].forEach(ev => {
-      slider.addEventListener(ev, flashLabels, { passive:true });
-    });
 
     vid.addEventListener('loadedmetadata', ()=>{
       slider.max = NUMBER_OF_FRAMES;
-      positionLabels();
       slider.value = 0;
       updateThumbColor(0);
     });
@@ -241,7 +212,6 @@
       }
     });
 
-    let accelerating = false;
     function showOverlay(){
       overlay.classList.add('is-visible');
       overlay.setAttribute('aria-hidden','false');
@@ -254,6 +224,7 @@
       allowSync = false;
       sendToParent({ type: 'lockScroll', value: true });
     }
+
     function hideOverlay(){
       overlay.classList.remove('is-visible');
       overlay.setAttribute('aria-hidden','true');
@@ -263,6 +234,7 @@
       allowSync = true;
       sendToParent({ type: 'lockScroll', value: false });
     }
+
     function accelerateAndFinish(){
       if (!overlay.classList.contains('is-visible')) return;
       if (accelerating) return;
@@ -271,6 +243,7 @@
       v1.playbackRate = SCREENSAVER_ACCEL;
       try { v1.play().catch(()=>{}); } catch(_) {}
     }
+
     v1.addEventListener('ended', ()=>{
       if (!overlay.classList.contains('is-visible')) return;
       overlay.classList.add('mode-intro');
