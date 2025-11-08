@@ -37,6 +37,38 @@
       position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
     }
 
+    /* Screensaver logos - click-through enabled */
+    #screensaver img {
+      position: absolute;
+      pointer-events: none; /* allow clicks to pass through */
+      z-index: 1;
+      opacity: 1;
+      transition: opacity 0.5s ease-out;
+    }
+    #screensaver.mode-intro img {
+      opacity: 0;
+    }
+    #screensaver .logo-cathedral {
+      top: 8vh;
+      left: 52%;
+      transform: translateX(-50%);
+      height: 12vh;
+      width: auto;
+    }
+    #screensaver .logo-heritage {
+      top: 4vh;
+      right: 4vw;
+      height: 10vh;
+      width: auto;
+    }
+    #screensaver .logo-touch {
+      bottom: 10vh;
+      left: 52%;
+      transform: translateX(-50%);
+      height: 8vh;
+      width: auto;
+    }
+
     /* Solid neutral slider bar (no gradient) */
     #scrubber {
       width: 54vw;
@@ -105,6 +137,9 @@
     <video id="ssv2" playsinline muted preload="auto">
       <source src="intro.mp4" type="video/mp4" />
     </video>
+    <img src="portsmouth-cathedral.webp" alt="Portsmouth Cathedral" class="logo-cathedral">
+    <img src="heritage-fund.png" alt="Heritage Fund" class="logo-heritage">
+    <img src="touch.png" alt="Touch to interact" class="logo-touch">
   </div>
 
   <script>
