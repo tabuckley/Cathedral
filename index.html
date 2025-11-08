@@ -67,6 +67,11 @@
       transform: translateX(-50%);
       height: 8vh;
       width: auto;
+      animation: touchPulse 3s ease-in-out infinite;
+    }
+    @keyframes touchPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
     }
 
     /* Solid neutral slider bar (no gradient) */
@@ -114,6 +119,30 @@
     }
     #year-labels.is-visible { opacity: 1; transform: translateY(0); }
 
+    /* Swipe hint icon */
+    #swipe-hint {
+      position: absolute;
+      bottom: 90px;
+      left: calc(0.5vw); /* positioned to the left */
+      width: 80px;
+      height: 80px;
+      color: rgba(255, 255, 255, 0.8);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.5s ease-out;
+    }
+    #swipe-hint.is-visible {
+      opacity: 1;
+      animation: swipeHint 2.5s ease-in-out infinite;
+    }
+    @keyframes swipeHint {
+      0% { transform: translateX(0); opacity: 1; }
+      40% { transform: translateX(-25px); opacity: 0.6; }
+      50% { opacity: 0.3; }
+      60% { transform: translateX(-25px); opacity: 0.6; }
+      100% { transform: translateX(0); opacity: 1; }
+    }
+
     @media (max-width: 768px) {
       #scrubber, #year-labels { width: 90vw; }
       #scrubber-container { bottom: 12vh; }
@@ -128,6 +157,7 @@
   <div id="scrubber-container">
     <div id="year-labels"></div>
     <input type="range" id="scrubber" aria-label="video scrubber" min="0" max="300" value="0" step="1">
+    <img id="swipe-hint" src="swipeicon.png" alt="Swipe to explore" class="is-visible">
   </div>
 
   <div id="screensaver" class="is-visible" aria-hidden="false">
@@ -163,6 +193,7 @@
     const overlay = document.getElementById('screensaver');
     const v1 = document.getElementById('ssv1'); // screensaver loop
     const v2 = document.getElementById('ssv2'); // intro
+    const swipeHint = document.getElementById('swipe-hint');
 
     let lastSentAt = 0;
     let allowSync = false;
@@ -211,6 +242,16 @@
       const frame = parseInt(slider.value);
       seekToFrame(frame);
       updateThumbColor(frame);
+
+      // Hide swipe hint when slider moves from 0
+      if (frame > 0 && swipeHint.classList.contains('is-visible')) {
+        swipeHint.classList.remove('is-visible');
+      }
+      // Show swipe hint when back at 0
+      if (frame === 0 && !swipeHint.classList.contains('is-visible')) {
+        swipeHint.classList.add('is-visible');
+      }
+
       if (allowSync) {
         const now = performance.now();
         if (now - lastSentAt >= SEND_INTERVAL_MS) {
@@ -232,6 +273,7 @@
         updateThumbColor(clamped);
         hideOverlay();      // skip screensaver/intro
         allowSync = true;
+        if (clamped > 0) swipeHint.classList.remove('is-visible');
         const ratio = clamped / NUMBER_OF_FRAMES;
         sendToParent({ type:'scrubValue', value: ratio });
       } else {
@@ -275,6 +317,7 @@
           updateThumbColor(frame);
           hideOverlay();
           allowSync = true;
+          if (frame > 0) swipeHint.classList.remove('is-visible');
           const ratio = frame / NUMBER_OF_FRAMES;
           sendToParent({ type:'scrubValue', value: ratio });
         }
@@ -302,6 +345,10 @@
       try { v2.pause(); } catch(_) {}
       allowSync = true;
       sendToParent({ type: 'lockScroll', value: false });
+      // Show swipe hint when overlay is dismissed and slider is at 0
+      if (parseInt(slider.value) === 0) {
+        swipeHint.classList.add('is-visible');
+      }
     }
     function accelerateAndFinish(){
       if (!overlay.classList.contains('is-visible')) return;
