@@ -8,6 +8,26 @@
   <style>
     html,body{overflow:hidden;margin:0;padding:0;background:#000}
 
+    /* Frame images container */
+    #frames-container {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+    #frames-container img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+    }
+    #frames-container img.active {
+      display: block;
+    }
+
     /* overlay should block clicks while visible; when hidden allow events through */
     #screensaver.is-visible{ pointer-events:auto; }
     #screensaver:not(.is-visible){ pointer-events:none; }
@@ -153,9 +173,7 @@
   </style>
 </head>
 <body>
-  <video id="v0" playsinline muted preload="auto">
-    <source src="fingers.mp4" type="video/mp4" />
-  </video>
+  <div id="frames-container"></div>
 
   <div id="scrubber-container">
     <div id="year-labels"></div>
@@ -191,7 +209,7 @@
       '#344696'  // blue
     ];
 
-    const vid = document.getElementById('v0');
+    const framesContainer = document.getElementById('frames-container');
     const slider = document.getElementById('scrubber');
     const overlay = document.getElementById('screensaver');
     const v1 = document.getElementById('ssv1'); // screensaver loop
@@ -201,6 +219,8 @@
     let lastSentAt = 0;
     let allowSync = false;
     let accelerating = false;
+    let frameImages = [];
+    let currentFrameIndex = 0;
 
     // NEW: support resume via ?frame=### from parent
     let startFrame = null;   // integer frame to jump to
@@ -231,19 +251,38 @@
       slider.style.setProperty('--thumb-color', getColorForFrame(frame));
     }
 
-    function seekToFrame(frameNum){
-      if (!vid.duration) return;
-      const time = frameNum / FPS;
-      vid.currentTime = Math.min(time, vid.duration);
+    // Preload all frame images
+    function preloadFrames() {
+      const totalImages = 50; // We have 50 frames (every 5th frame from 0-245)
+      for (let i = 1; i <= totalImages; i++) {
+        const img = document.createElement('img');
+        const paddedNum = String(i).padStart(4, '0');
+        img.src = `frames/frame_${paddedNum}.png`;
+        img.alt = `Frame ${i}`;
+        if (i === 1) img.classList.add('active');
+        framesContainer.appendChild(img);
+        frameImages.push(img);
+      }
     }
-    function getCurrentFrame(){
-      if (!vid.duration) return 0;
-      return Math.floor(vid.currentTime * FPS);
+
+    function setBackgroundFrame(frameNum){
+      // Convert frame number to image number (every 5th frame)
+      const imageIndex = Math.floor(frameNum / 5);
+      const clampedIndex = Math.max(0, Math.min(imageIndex, frameImages.length - 1));
+
+      if (clampedIndex !== currentFrameIndex) {
+        frameImages[currentFrameIndex].classList.remove('active');
+        frameImages[clampedIndex].classList.add('active');
+        currentFrameIndex = clampedIndex;
+      }
     }
+
+    // Initialize frames
+    preloadFrames();
 
     slider.addEventListener('input', () => {
       const frame = parseInt(slider.value);
-      seekToFrame(frame);
+      setBackgroundFrame(frame);
       updateThumbColor(frame);
 
       // Hide swipe hint when slider moves from 0
@@ -265,65 +304,55 @@
       }
     });
 
-    // Apply initial frame after metadata (covers parent message arriving early)
-    vid.addEventListener('loadedmetadata', ()=>{
-      slider.max = NUMBER_OF_FRAMES;
+    // Initialize slider
+    slider.max = NUMBER_OF_FRAMES;
 
-      if (skipIntro && startFrame !== null) {
-        const clamped = Math.max(0, Math.min(startFrame, NUMBER_OF_FRAMES));
-        slider.value = clamped;
-        seekToFrame(clamped);
-        updateThumbColor(clamped);
-        hideOverlay();      // skip screensaver/intro
-        allowSync = true;
-        if (clamped > 0) swipeHint.classList.remove('is-visible');
-        const ratio = clamped / NUMBER_OF_FRAMES;
-        sendToParent({ type:'scrubValue', value: ratio });
-      } else {
-        slider.value = 0;
-        updateThumbColor(0);
-      }
-    });
-
-    function updateSliderFromVideo(){
-      if (!vid.duration) return;
-      slider.value = getCurrentFrame();
+    if (skipIntro && startFrame !== null) {
+      const clamped = Math.max(0, Math.min(startFrame, NUMBER_OF_FRAMES));
+      slider.value = clamped;
+      setBackgroundFrame(clamped);
+      updateThumbColor(clamped);
+      hideOverlay();      // skip screensaver/intro
+      allowSync = true;
+      if (clamped > 0) swipeHint.classList.remove('is-visible');
+      const ratio = clamped / NUMBER_OF_FRAMES;
+      sendToParent({ type:'scrubValue', value: ratio });
+    } else {
+      slider.value = 0;
+      setBackgroundFrame(0);
+      updateThumbColor(0);
     }
-    ['timeupdate','seeking','seeked','play','pause'].forEach(ev=>{
-      vid.addEventListener(ev, updateSliderFromVideo);
-    });
+
 
     // Parent → Child messages (now handles initialFrame again)
     addEventListener('message', (evt) => {
       const msg = parseMsg(evt.data);
 
-      // scroll sync (unchanged)
+      // scroll sync
       if (msg.type === 'scrollValue') {
         const ratio = Math.max(0, Math.min(1, Number(msg.value) || 0));
         const frame = Math.floor(ratio * NUMBER_OF_FRAMES);
         slider.value = frame;
-        seekToFrame(frame);
+        setBackgroundFrame(frame);
         updateThumbColor(frame);
       }
 
-      // NEW: initial frame from parent
+      // initial frame from parent
       if (msg.type === 'initialFrame' && msg.value !== undefined) {
         const raw = parseInt(msg.value);
         const frame = Math.max(0, Math.min(raw, NUMBER_OF_FRAMES - 1));
         startFrame = frame;
         skipIntro = true;
 
-        // If video is already ready, jump immediately
-        if (vid.duration && vid.readyState >= 2) {
-          slider.value = frame;
-          seekToFrame(frame);
-          updateThumbColor(frame);
-          hideOverlay();
-          allowSync = true;
-          if (frame > 0) swipeHint.classList.remove('is-visible');
-          const ratio = frame / NUMBER_OF_FRAMES;
-          sendToParent({ type:'scrubValue', value: ratio });
-        }
+        // Jump immediately
+        slider.value = frame;
+        setBackgroundFrame(frame);
+        updateThumbColor(frame);
+        hideOverlay();
+        allowSync = true;
+        if (frame > 0) swipeHint.classList.remove('is-visible');
+        const ratio = frame / NUMBER_OF_FRAMES;
+        sendToParent({ type:'scrubValue', value: ratio });
       }
     });
 
